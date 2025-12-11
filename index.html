@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
+    <title>Dreamy Christmas Tree Album</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Lato:wght@300;400&display=swap" rel="stylesheet">
+    <style>
+      body { margin: 0; padding: 0; overflow: hidden; background-color: #050510; font-family: 'Lato', sans-serif; }
+      #root { width: 100vw; height: 100vh; }
+      .dreamy-text { font-family: 'Cinzel', serif; text-shadow: 0 0 10px rgba(255,215,0,0.6); }
+      /* Hide scrollbar for overlay content */
+      ::-webkit-scrollbar { width: 0px; background: transparent; }
+    </style>
+  <script>
+    // Aggressively suppress TFLite/MediaPipe informational logs
+    (function() {
+      const originalInfo = console.info;
+      const originalLog = console.log;
+      const originalWarn = console.warn;
+      const originalError = console.error;
+
+      const shouldSuppress = (args) => {
+        const text = args.map(String).join(' ');
+        return text.includes('Created TensorFlow Lite XNNPACK delegate for CPU') || 
+               text.includes('WASM') ||
+               text.includes('INFO: Created TensorFlow Lite');
+      };
+
+      console.info = function(...args) {
+        if (shouldSuppress(args)) return;
+        originalInfo.apply(console, args);
+      };
+
+      console.log = function(...args) {
+        if (shouldSuppress(args)) return;
+        originalLog.apply(console, args);
+      };
+
+      console.warn = function(...args) {
+        if (shouldSuppress(args)) return;
+        originalWarn.apply(console, args);
+      };
+
+      console.error = function(...args) {
+        if (shouldSuppress(args)) return;
+        originalError.apply(console, args);
+      };
+    })();
+  </script>
+  <script type="importmap">
+{
+  "imports": {
+    "three": "https://esm.sh/three@^0.182.0",
+    "@react-three/fiber": "https://esm.sh/@react-three/fiber@^9.4.2",
+    "@mediapipe/tasks-vision": "https://esm.sh/@mediapipe/tasks-vision@0.10.14",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.1/",
+    "react/": "https://esm.sh/react@^19.2.1/",
+    "react": "https://esm.sh/react@^19.2.1",
+    "@react-three/drei": "https://esm.sh/@react-three/drei@^10.7.7",
+    "@react-three/postprocessing": "https://esm.sh/@react-three/postprocessing@^3.0.4"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

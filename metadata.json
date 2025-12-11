@@ -1,0 +1,7 @@
+{
+  "name": "Dreamy Christmas Tree Album",
+  "description": "A magical, gesture-controlled 3D photo album that transforms from a Christmas tree into a floating gallery using hand tracking.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

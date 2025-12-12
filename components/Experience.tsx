@@ -113,8 +113,9 @@ const Experience: React.FC<ExperienceProps> = ({ handData, setMode, bgImage, use
             <MagicalTree handData={handData} setMode={setMode} userPhotos={userPhotos} />
         </Suspense>
 
-        <EffectComposer disableNormalPass>
-          <Bloom luminanceThreshold={0.4} mipmapBlur intensity={2.0} radius={0.5} color="#FFD700" />
+        <EffectComposer enableNormalPass={false}>
+          {/* Increased threshold to 1.0 to ensure standard photos (intensity <= 1) do not bloom */}
+          <Bloom luminanceThreshold={1.0} mipmapBlur intensity={1.5} radius={0.5} color="#FFD700" />
           <Vignette eskil={false} offset={0.1} darkness={1.0} />
           <Noise opacity={0.05} />
         </EffectComposer>

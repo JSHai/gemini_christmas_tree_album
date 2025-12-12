@@ -1,4 +1,23 @@
 import * as THREE from 'three';
+import { ThreeElements } from '@react-three/fiber';
+
+// Extend global JSX for legacy/global support
+declare global {
+  namespace JSX {
+    interface IntrinsicElements extends ThreeElements {
+      [elemName: string]: any;
+    }
+  }
+}
+
+// Extend React's JSX namespace for React 18+ support
+declare module 'react' {
+  namespace JSX {
+    interface IntrinsicElements extends ThreeElements {
+      [elemName: string]: any;
+    }
+  }
+}
 
 export enum GestureType {
   None = 'None',
@@ -13,6 +32,7 @@ export interface HandData {
   x: number; // Normalized 0-1 (inverted x for mirror effect)
   y: number; // Normalized 0-1
   isPinching: boolean;
+  isTracked: boolean;
 }
 
 export interface PhotoData {

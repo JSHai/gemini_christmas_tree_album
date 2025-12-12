@@ -72,7 +72,7 @@ const App: React.FC = () => {
       />
 
       {/* Hand Cursor */}
-      {handData.gesture !== GestureType.None && (
+      {(handData.gesture !== GestureType.None || handData.isPinching) && (
         <div 
             className="absolute w-8 h-8 rounded-full pointer-events-none transform -translate-x-1/2 -translate-y-1/2 shadow-[0_0_20px_#FFD700] transition-all duration-100 z-50 border border-[#FFD700]"
             style={{ 

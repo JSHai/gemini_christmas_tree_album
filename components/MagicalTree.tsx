@@ -18,6 +18,10 @@ const RIBBON_PARTICLE_COUNT = 1200;
 const RADIUS_TREE_BASE = 2.8;
 const HEIGHT_TREE = 9.0;
 
+// --- Global Cache ---
+const textureLoader = new THREE.TextureLoader();
+const textureCache = new Map<string, THREE.Texture>();
+
 // --- Materials ---
 const matGold = new THREE.MeshStandardMaterial({ 
     color: "#FFD700", 
@@ -29,7 +33,7 @@ const matGold = new THREE.MeshStandardMaterial({
 
 const matRed = new THREE.MeshStandardMaterial({
     color: "#B22222", // Firebrick red for a richer look
-    roughness: 0.3,
+    roughness: 0.3, 
     metalness: 0.2,
     emissive: "#800000",
     emissiveIntensity: 0.1
@@ -43,21 +47,10 @@ const matWhite = new THREE.MeshStandardMaterial({
     emissiveIntensity: 0.1
 });
 
-// Reduced glass effect significantly to prevent washing out the photo
-const matGlass = new THREE.MeshPhysicalMaterial({
-    roughness: 0.05,
-    transmission: 0.99, 
-    thickness: 0.01,
-    clearcoat: 1,
-    transparent: true,
-    opacity: 0.02, // Extremely subtle glass to avoid haze
-});
-
 // --- Helper Functions ---
 
 const getTreePos = (i: number, count: number) => {
     const tLinear = i / count;
-    // Power curve to make bottom denser (t^1.25)
     const t = Math.pow(tLinear, 1.25);
     
     const angle = i * 2.399; 
@@ -72,7 +65,6 @@ const getTreePos = (i: number, count: number) => {
 
 const getHeartPos = (i: number, count: number, offsetTime: number) => {
     const t = ((i / count) * Math.PI * 2 + offsetTime) % (Math.PI * 2);
-    // Slightly larger scale for the heart layout to accommodate larger photos
     const scale = 0.35;
     const x = 16 * Math.pow(Math.sin(t), 3);
     const y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
@@ -88,7 +80,6 @@ const SpiralRibbon = ({ visible }: { visible: boolean }) => {
     const segments = 120;
     for (let i = 0; i <= segments; i++) {
       const tLinear = i / segments;
-      // Match density with tree
       const t = Math.pow(tLinear, 1.15);
       
       const angle = tLinear * Math.PI * 2 * turns;
@@ -165,7 +156,6 @@ const OuterGhostTree = ({ visible }: { visible: boolean }) => {
         const sizes = new Float32Array(OUTER_PARTICLE_COUNT);
         for (let i = 0; i < OUTER_PARTICLE_COUNT; i++) {
             const tLinear = Math.random(); 
-            // Ghost tree slightly less dense modification but still bottom heavy
             const t = Math.pow(tLinear, 1.2);
             
             const y = (t * HEIGHT_TREE * 1.2) - (HEIGHT_TREE * 1.2 / 2); 
@@ -266,6 +256,8 @@ type SharedState = { closestId: number | null; };
 // --- Main Component ---
 const MagicalTree: React.FC<MagicalTreeProps> = ({ handData, setMode, userPhotos }) => {
   const [targetMode, setTargetMode] = useState<'tree' | 'gallery'>('tree');
+  const [highlightedId, setHighlightedId] = useState<number | null>(null);
+  
   const groupRef = useRef<THREE.Group>(null);
   const particleGroupRef = useRef<THREE.Group>(null);
   const gestureTimer = useRef<number>(0);
@@ -317,12 +309,11 @@ const MagicalTree: React.FC<MagicalTreeProps> = ({ handData, setMode, userPhotos
         let minD = Infinity;
         let cId = -1;
         
-        if (handData.x !== 0.5 || handData.y !== 0.5) {
+        if (handData.isTracked) {
                 const handVec = new THREE.Vector3((handData.x * 2) - 1, -(handData.y * 2) + 1, 0);
                 
                 for(let i=0; i<items.length; i++) {
                     const item = items[i];
-                    // Skip interaction for ornaments if desired, but here we only care about photos for selection
                     if (item.type !== 'photo') continue;
 
                     const time = state.clock.elapsedTime;
@@ -386,6 +377,28 @@ const MagicalTree: React.FC<MagicalTreeProps> = ({ handData, setMode, userPhotos
 
   }, [userPhotos]);
 
+  // Effect: Randomly highlight one photo when photos are uploaded/changed
+  useEffect(() => {
+    if (userPhotos.length === 0) return;
+
+    // Find valid photo items
+    const photoItems = items.filter(i => i.type === 'photo');
+    if (photoItems.length > 0) {
+        // Pick random photo
+        const randomIndex = Math.floor(Math.random() * photoItems.length);
+        const targetId = photoItems[randomIndex].id;
+        
+        setHighlightedId(targetId);
+
+        // Reset after 1s
+        const timer = setTimeout(() => {
+            setHighlightedId(null);
+        }, 1000);
+
+        return () => clearTimeout(timer);
+    }
+  }, [items]); // Dependencies: items updates when userPhotos updates
+
   return (
     <group>
       <group ref={groupRef}>
@@ -400,6 +413,7 @@ const MagicalTree: React.FC<MagicalTreeProps> = ({ handData, setMode, userPhotos
             handData={handData}
             sharedState={sharedState}
             groupRotationRef={groupRef}
+            highlightedId={highlightedId}
             />
         ))}
       </group>
@@ -461,7 +475,8 @@ const TreeItem: React.FC<{
     handData: HandData; 
     sharedState: React.MutableRefObject<SharedState>;
     groupRotationRef: React.RefObject<THREE.Group>;
-}> = ({ data, total, targetMode, handData, sharedState, groupRotationRef }) => {
+    highlightedId: number | null;
+}> = ({ data, total, targetMode, handData, sharedState, groupRotationRef, highlightedId }) => {
   const group = useRef<THREE.Group>(null);
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
   const [aspect, setAspect] = useState(1);
@@ -475,20 +490,32 @@ const TreeItem: React.FC<{
 
   useEffect(() => {
     if (data.type !== 'photo') return;
-    const loader = new THREE.TextureLoader();
-    // Removed crossOrigin to support local blobs
-    loader.load(
-        data.url, 
-        (tex) => {
-            tex.colorSpace = THREE.SRGBColorSpace;
-            if (tex.image && tex.image.width && tex.image.height) {
-                setAspect(tex.image.width / tex.image.height);
-            }
-            setTexture(tex);
-        },
-        undefined,
-        (err) => { /* Ignore errors */ }
-    );
+    
+    if (textureCache.has(data.url)) {
+        const tex = textureCache.get(data.url)!;
+        if (tex.image && (tex.image as any).width && (tex.image as any).height) {
+            setAspect((tex.image as any).width / (tex.image as any).height);
+        }
+        setTexture(tex);
+    } else {
+        textureLoader.load(
+            data.url, 
+            (tex) => {
+                tex.colorSpace = THREE.SRGBColorSpace;
+                tex.generateMipmaps = true; 
+                tex.minFilter = THREE.LinearMipmapLinearFilter;
+                
+                textureCache.set(data.url, tex);
+                
+                if (tex.image && (tex.image as any).width && (tex.image as any).height) {
+                    setAspect((tex.image as any).width / (tex.image as any).height);
+                }
+                setTexture(tex);
+            },
+            undefined,
+            (err) => { /* Ignore errors */ }
+        );
+    }
   }, [data.url, data.type]);
 
   useFrame((state, delta) => {
@@ -502,23 +529,26 @@ const TreeItem: React.FC<{
     }
 
     const isHovered = sharedState.current.closestId === data.id;
+    const isHighlighted = highlightedId === data.id;
+    // Treat highlighted (random pop) similar to zoom but maybe without moving to camera if we want just a scale pop
+    // But moving to camera is cool. Let's stick to simple large scale for "Enlarge".
+    // Moving to camera is "Focus". "Enlarge" is scaling.
+    // Let's do large scale in place for highlight to differentiate from manual pinch-zoom.
     const isZoomed = isHovered && handData.isPinching && data.type === 'photo';
 
     // --- Visual Effects Logic ---
     if (data.type === 'photo') {
         const time = state.clock.elapsedTime;
         
-        // 1. Photo Brightness & Smooth Update
+        // 1. Photo Brightness
         if (photoMatRef.current) {
-            let targetEmissive = 0.5; // Brighter baseline for visibility
+            let targetEmissive = 0.4; 
             
-            if (isZoomed) {
-                // Dim COMPLETELY to avoid bright spot in center when zoomed
-                targetEmissive = 0.0; 
+            if (isZoomed || isHighlighted) {
+                targetEmissive = 1.0; 
             } else {
-                // Subtle breathing
-                const breath = Math.sin(time * 2 + data.id * 0.1) * 0.1;
-                targetEmissive = 0.5 + breath;
+                const breath = Math.sin(time * 2 + data.id * 0.1) * 0.05;
+                targetEmissive = 0.4 + breath; 
             }
             
             photoMatRef.current.emissiveIntensity = THREE.MathUtils.lerp(
@@ -528,9 +558,9 @@ const TreeItem: React.FC<{
             );
         }
 
-        // 2. Elegant Flowing Frame Border
+        // 2. Frame Glow
         if (frameMatRef.current) {
-             const zoomedGlow = isZoomed ? 1.5 : 0.0;
+             const zoomedGlow = (isZoomed || isHighlighted) ? 1.5 : 0.0;
              const flow = Math.sin(time * 2 + data.id * 0.5) * 0.3 + 0.7;
              const targetIntensity = zoomedGlow > 0 ? zoomedGlow : 0.5 * flow;
 
@@ -543,7 +573,7 @@ const TreeItem: React.FC<{
     }
 
     if (isZoomed) {
-        // --- ZOOM ACTIVE ---
+        // --- MANUAL PINCH ZOOM (Move to Front) ---
         const camDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
         const zoomTargetWorld = camera.position.clone().add(camDir.multiplyScalar(5.0)); 
         
@@ -573,7 +603,7 @@ const TreeItem: React.FC<{
         }
         
     } else {
-        // --- IDLE / RESTORE ---
+        // --- IDLE / RESTORE / HIGHLIGHT ---
         const photoScale = targetMode === 'gallery' ? 1.15 : 0.75;
         const baseScale = data.type === 'photo' ? photoScale : 0.8;
         
@@ -589,6 +619,11 @@ const TreeItem: React.FC<{
                  scaleY *= 1.3;
              }
              
+             if (isHighlighted) {
+                 scaleX *= 2.5; // Big pop for uploaded highlight
+                 scaleY *= 2.5;
+             }
+             
              // Min thickness
              group.current.scale.lerp(new THREE.Vector3(scaleX, scaleY, 0.05), delta * 4);
         } else {
@@ -596,6 +631,10 @@ const TreeItem: React.FC<{
              const s = isHovered ? baseScale * 1.3 : baseScale;
              group.current.scale.lerp(new THREE.Vector3(s, s, s), delta * 4);
         }
+        
+        // Push highlighted item slightly towards camera in its local space logic to avoid clipping if possible
+        // But since tree rotates, pushing along normal (0,0,1) in item space works if item looks at something.
+        // For now, simpler: just lerp position. 2.5x scale usually pops out enough visually.
         
         group.current.position.lerp(targetPos, delta * 3);
         
@@ -650,12 +689,12 @@ const TreeItem: React.FC<{
                             ref={photoMatRef}
                             map={texture} 
                             emissiveMap={texture} 
-                            color="#FFFFFF"
+                            color="#000000" // Black base for screen-like effect
                             emissive="#FFFFFF"
-                            emissiveIntensity={0.5} 
-                            roughness={0.8} // Increased roughness to diffuse spotlight glare
+                            emissiveIntensity={0.5} // Start lower to avoid boom
+                            roughness={0.5} 
                             metalness={0.0}
-                            toneMapped={false} 
+                            toneMapped={false} // CRITICAL: Disable tone mapping to preserve colors and prevent white-out
                             side={THREE.DoubleSide}
                             transparent={false}
                         />
@@ -681,13 +720,12 @@ const TreeItem: React.FC<{
     <group ref={group}>
         {renderItem()}
         {/* Interaction Sparkles */}
-        {sharedState.current.closestId === data.id && handData.isPinching && (
+        {(sharedState.current.closestId === data.id && handData.isPinching) || highlightedId === data.id ? (
              <group>
-                {/* SIGNIFICANTLY REDUCED INTENSITY (0.5 -> 0.1) AND MOVED BACK (3->5) to prevent washout on zoom */}
                 <pointLight distance={4} intensity={0.1} color="#FFD700" position={[0,0,5]} />
                 <Sparkles count={30} scale={2} size={6} speed={1.5} opacity={1} color="#FFF" />
              </group>
-        )}
+        ) : null}
         {/* Gallery Mode Ambient Sparkles - Subtle */}
         {targetMode === 'gallery' && data.type === 'photo' && (
             <group>

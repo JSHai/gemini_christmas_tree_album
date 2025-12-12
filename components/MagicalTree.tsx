@@ -73,6 +73,83 @@ const getHeartPos = (i: number, count: number, offsetTime: number) => {
 
 // --- Procedural Models ---
 
+const HeartFlowParticles = ({ visible }: { visible: boolean }) => {
+    const count = 3000;
+    const mesh = useRef<THREE.Points>(null);
+    
+    const particles = useMemo(() => {
+        const positions = new Float32Array(count * 3);
+        const randoms = new Float32Array(count); 
+        const speeds = new Float32Array(count);
+        const offsets = new Float32Array(count * 3);
+
+        for (let i = 0; i < count; i++) {
+            randoms[i] = Math.random();
+            speeds[i] = 0.2 + Math.random() * 0.4; // Fluid speed
+            
+            // Random volume around the line
+            const r = Math.random() * 0.7; 
+            const angle = Math.random() * Math.PI * 2;
+            offsets[i*3] = Math.cos(angle) * r;
+            offsets[i*3+1] = Math.sin(angle) * r;
+            offsets[i*3+2] = (Math.random() - 0.5) * 3.0; // Thicker Z depth for volume
+        }
+        return { positions, randoms, speeds, offsets };
+    }, []);
+
+    useFrame((state) => {
+        if (!mesh.current) return;
+
+        const tBase = state.clock.elapsedTime;
+        const positions = mesh.current.geometry.attributes.position.array as Float32Array;
+        const scale = 0.35;
+
+        for (let i = 0; i < count; i++) {
+             // Continuous flow along the curve 0 -> 2PI
+             const t = (particles.randoms[i] * Math.PI * 2 + tBase * particles.speeds[i]) % (Math.PI * 2);
+             
+             // Heart Curve
+             const x = 16 * Math.pow(Math.sin(t), 3);
+             const y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+             
+             // Apply
+             positions[i*3] = (x * scale) + particles.offsets[i*3];
+             positions[i*3+1] = (y * scale) + 1 + particles.offsets[i*3+1];
+             positions[i*3+2] = particles.offsets[i*3+2];
+        }
+        mesh.current.geometry.attributes.position.needsUpdate = true;
+        
+        // Visibility transition
+        const targetScale = visible ? 1 : 0.01;
+        mesh.current.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1);
+        
+        const mat = mesh.current.material as THREE.PointsMaterial;
+        mat.opacity = THREE.MathUtils.lerp(mat.opacity, visible ? 0.6 : 0, 0.1);
+    });
+
+    return (
+         <points ref={mesh}>
+            <bufferGeometry>
+                <bufferAttribute 
+                    attach="attributes-position" 
+                    count={count} 
+                    array={particles.positions} 
+                    itemSize={3} 
+                />
+            </bufferGeometry>
+            <pointsMaterial 
+                size={0.12} 
+                color="#FFD700" 
+                transparent 
+                opacity={0} 
+                blending={THREE.AdditiveBlending} 
+                sizeAttenuation
+                depthWrite={false}
+            />
+         </points>
+    );
+};
+
 const SpiralRibbon = ({ visible }: { visible: boolean }) => {
   const curve = useMemo(() => {
     const points = [];
@@ -403,6 +480,7 @@ const MagicalTree: React.FC<MagicalTreeProps> = ({ handData, setMode, userPhotos
     <group>
       <group ref={groupRef}>
         <SpiralRibbon visible={targetMode === 'tree'} />
+        <HeartFlowParticles visible={targetMode === 'gallery'} />
         <OuterGhostTree visible={targetMode === 'tree'} />
         {items.map((data) => (
             <TreeItem 
@@ -530,10 +608,6 @@ const TreeItem: React.FC<{
 
     const isHovered = sharedState.current.closestId === data.id;
     const isHighlighted = highlightedId === data.id;
-    // Treat highlighted (random pop) similar to zoom but maybe without moving to camera if we want just a scale pop
-    // But moving to camera is cool. Let's stick to simple large scale for "Enlarge".
-    // Moving to camera is "Focus". "Enlarge" is scaling.
-    // Let's do large scale in place for highlight to differentiate from manual pinch-zoom.
     const isZoomed = isHovered && handData.isPinching && data.type === 'photo';
 
     // --- Visual Effects Logic ---
@@ -604,11 +678,14 @@ const TreeItem: React.FC<{
         
     } else {
         // --- IDLE / RESTORE / HIGHLIGHT ---
-        const photoScale = targetMode === 'gallery' ? 1.15 : 0.75;
+        const photoScale = targetMode === 'gallery' ? 1.5 : 0.75;
         const baseScale = data.type === 'photo' ? photoScale : 0.8;
         
         let scaleX = baseScale;
         let scaleY = baseScale;
+
+        // Use a local variable to modify position for layering without affecting targetPos logic
+        const finalPos = targetPos.clone();
         
         if (data.type === 'photo') {
              if (aspect > 1) scaleY = baseScale / aspect;
@@ -620,23 +697,28 @@ const TreeItem: React.FC<{
              }
              
              if (isHighlighted) {
-                 scaleX *= 2.5; // Big pop for uploaded highlight
+                 scaleX *= 2.5; 
                  scaleY *= 2.5;
              }
              
-             // Min thickness
              group.current.scale.lerp(new THREE.Vector3(scaleX, scaleY, 0.05), delta * 4);
+
+             // Bring photos slightly forward in Gallery mode (inside the particle volume)
+             if (targetMode === 'gallery') {
+                 finalPos.z += 0.3;
+             }
         } else {
              // Ornaments
              const s = isHovered ? baseScale * 1.3 : baseScale;
              group.current.scale.lerp(new THREE.Vector3(s, s, s), delta * 4);
+
+             // Push ornaments back in Gallery mode
+             if (targetMode === 'gallery') {
+                 finalPos.z -= 2.5;
+             }
         }
         
-        // Push highlighted item slightly towards camera in its local space logic to avoid clipping if possible
-        // But since tree rotates, pushing along normal (0,0,1) in item space works if item looks at something.
-        // For now, simpler: just lerp position. 2.5x scale usually pops out enough visually.
-        
-        group.current.position.lerp(targetPos, delta * 3);
+        group.current.position.lerp(finalPos, delta * 3);
         
         if (targetMode === 'gallery') {
             // In gallery mode, everything faces camera (flat icon look)
